@@ -67,6 +67,9 @@ class Engine{
   })
  }
 }
+
+const engine = new Engine();
+
 function status(msg){
  if(msg){el.status.textContent=msg;return}
  if(game.isCheckmate())el.status.textContent='Checkmate.';
