@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="One Move Better: a free beginner-friendly chess coach.">
+  <title>One Move Better</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">FREE CHESS COACH</p>
+        <h1>One Move Better</h1>
+        <p class="tagline">Don't just tell me my move was wrong. Teach me why.</p>
+      </div>
+      <div id="engine-status" class="engine-status" aria-live="polite">Loading Stockfish…</div>
+    </header>
+
+    <section class="layout">
+      <div class="board-column">
+        <div id="board" class="board" aria-label="Interactive chessboard"></div>
+        <div class="board-actions">
+          <button id="reset-btn" type="button" class="button primary">New game</button>
+          <button id="flip-btn" type="button" class="button">Flip board</button>
+        </div>
+        <p class="small-note">Tap a piece, then its destination. Analysis happens in your browser.</p>
+      </div>
+
+      <div class="coach-column">
+        <section class="panel">
+          <label for="intent"><strong>What are you trying to do?</strong> <span class="optional">Optional</span></label>
+          <select id="intent">
+            <option value="unsure">I'm not sure</option>
+            <option value="develop">Develop a piece</option>
+            <option value="attack">Attack something</option>
+            <option value="defend">Defend something</option>
+            <option value="castle">Protect my king / prepare to castle</option>
+            <option value="material">Win material</option>
+            <option value="position">Improve my position</option>
+          </select>
+        </section>
+
+        <section class="panel">
+          <p class="panel-kicker">POSITION</p>
+          <p id="position-status" class="position-status">White to move.</p>
+          <p id="last-move" class="muted">No move analysed yet.</p>
+        </section>
+
+        <section class="panel" aria-live="polite">
+          <div class="analysis-heading">
+            <div>
+              <p class="panel-kicker">COACH</p>
+              <h2 id="verdict">Make a move</h2>
+            </div>
+            <span id="loss-pill" class="loss-pill hidden"></span>
+          </div>
+
+          <p id="coach-main" class="coach-main">I'll compare your move with Stockfish and give you one useful thing to remember.</p>
+
+          <div id="comparison" class="comparison hidden">
+            <div><span>Your move</span><strong id="your-move">—</strong></div>
+            <div><span>Better move</span><strong id="best-move">—</strong></div>
+          </div>
+
+          <div id="lesson-box" class="lesson hidden">
+            <span>ONE THING TO REMEMBER</span>
+            <p id="lesson-text"></p>
+          </div>
+
+          <button id="show-better-btn" type="button" class="button primary hidden">Show me the better move</button>
+        </section>
+
+        <section class="panel">
+          <div class="history-heading">
+            <div>
+              <p class="panel-kicker">YOUR PATTERNS</p>
+              <h2>Recent lessons</h2>
+            </div>
+            <button id="clear-history-btn" type="button" class="text-button">Clear</button>
+          </div>
+          <p id="history-empty" class="muted">Your lessons will appear here.</p>
+          <ol id="history-list" class="history-list"></ol>
+        </section>
+      </div>
+    </section>
+
+    <footer>
+      <p>Stockfish calculates the chess. One Move Better turns the result into beginner-friendly coaching.</p>
+    </footer>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
