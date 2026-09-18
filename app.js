@@ -3,6 +3,7 @@ import { Chess } from 'https://cdn.jsdelivr.net/npm/chess.js@1.4.0/+esm';
 const ENGINE_PATH='./engine/stockfish-19-lite-single.js';
 const HISTORY_KEY='omb-history-v1';
 const DEPTH=10;
+const COMPUTER_DEPTH={beginner:3,club:6,strong:10};
 const ICON={wp:'♙',wn:'♘',wb:'♗',wr:'♖',wq:'♕',wk:'♔',bp:'♟',bn:'♞',bb:'♝',br:'♜',bq:'♛',bk:'♚'};
 
 const $=s=>document.querySelector(s);
@@ -11,10 +12,11 @@ const el={
  intent:$('#intent'),verdict:$('#verdict'),pill:$('#loss-pill'),main:$('#coach-main'),
  comparison:$('#comparison'),your:$('#your-move'),best:$('#best-move'),lessonBox:$('#lesson-box'),
  lesson:$('#lesson-text'),show:$('#show-better-btn'),reset:$('#reset-btn'),flip:$('#flip-btn'),
- history:$('#history-list'),historyEmpty:$('#history-empty'),clear:$('#clear-history-btn')
+ history:$('#history-list'),historyEmpty:$('#history-empty'),clear:$('#clear-history-btn'),
+ computer:$('#computer-level')
 };
 
-let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null;
+let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null,computerLevel='off';
 
 class Engine{
  constructor(){this.worker=null;this.pending=null;this.ready=null}
@@ -56,14 +58,14 @@ class Engine{
    }
   }
  }
- async analyse(fen){
+ async analyse(fen,depth=DEPTH){
   await this.init();
   if(this.pending)throw new Error('Engine busy');
   return new Promise((resolve,reject)=>{
    const timer=setTimeout(()=>{this.worker.postMessage('stop');this.pending=null;reject(new Error('Analysis timeout'))},25000);
    this.pending={info:null,done:v=>{clearTimeout(timer);resolve(v)}};
    this.worker.postMessage('position fen '+fen);
-   this.worker.postMessage('go depth '+DEPTH)
+   this.worker.postMessage('go depth '+depth)
   })
  }
 }
@@ -157,8 +159,29 @@ async function analyseMove(move,preFen,postFen,intent){
   console.error(err);el.verdict.textContent='Engine unavailable';tone('danger');
   el.main.textContent='The board still works, but Stockfish could not complete this analysis.';
   el.engine.textContent='Stockfish error';el.engine.className='engine-status error'
- }finally{busy=false;el.intent.value='unsure';render();status()}
+ }finally{
+  el.intent.value='unsure';
+  if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver())await playComputerMove();
+  busy=false;render();status()
+ }
 }
+async function playComputerMove(){
+ if(computerLevel==='off'||game.turn()!=='b'||game.isGameOver())return;
+ status('Computer thinking…');
+ el.last.textContent='Computer is thinking…';
+ render();
+ try{
+  const result=await engine.analyse(game.fen(),COMPUTER_DEPTH[computerLevel]||3);
+  if(!result.bestMove)throw new Error('No computer move');
+  const move=game.move(uciParts(result.bestMove));
+  if(!move)throw new Error('Computer returned an illegal move');
+  el.last.textContent='Computer played: '+move.san;
+ }catch(err){
+  console.error(err);
+  el.last.textContent='Computer could not move.';
+ }
+}
+
 function clickSquare(square){
  if(busy||showingBetter)return;
  const p=game.get(square);
@@ -194,6 +217,14 @@ el.reset.addEventListener('click',()=>{game=new Chess();selected=null;targets=[]
 el.flip.addEventListener('click',()=>{flipped=!flipped;render()});
 el.show.addEventListener('click',toggleBetter);
 el.clear.addEventListener('click',()=>{localStorage.removeItem(HISTORY_KEY);renderHistory()});
+el.computer.addEventListener('change',async()=>{
+ computerLevel=el.computer.value;
+ if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver()&&!busy){
+  busy=true;render();
+  await playComputerMove();
+  busy=false;render();status();
+ }
+});
 
 render();renderHistory();status();
 engine.init().then(()=>{el.engine.textContent='Stockfish ready';el.engine.className='engine-status ready'}).catch(err=>{console.error(err);el.engine.textContent='Stockfish failed to load';el.engine.className='engine-status error'});
