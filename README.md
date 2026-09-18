@@ -44,3 +44,5 @@ Improve the "why?" layer: hanging pieces, removed defenders, forks, pins, missed
 ## Stockfish licence
 
 Stockfish.js is GPLv3 software. This prototype loads the published browser build from jsDelivr rather than redistributing the engine files.
+
+Deployment: GitHub Pages workflow configured.
