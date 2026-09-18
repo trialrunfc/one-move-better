@@ -1,9 +1,6 @@
 import { Chess } from 'https://cdn.jsdelivr.net/npm/chess.js@1.4.0/+esm';
 
-const ENGINE_ASM_URLS=[
-  'https://cdn.jsdelivr.net/npm/stockfish@19.0.0/bin/stockfish-19-asm.js',
-  'https://cdn.jsdelivr.net/npm/stockfish@18.0.8/bin/stockfish-18-asm.js'
-];
+const ENGINE_PATH='./engine/stockfish-19-lite-single.js';
 const HISTORY_KEY='omb-history-v1';
 const DEPTH=10;
 const ICON={wp:'♙',wn:'♘',wb:'♗',wr:'♖',wq:'♕',wk:'♔',bp:'♟',bn:'♞',bb:'♝',br:'♜',bq:'♛',bk:'♚'};
@@ -21,31 +18,11 @@ let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResul
 
 class Engine{
  constructor(){this.worker=null;this.pending=null;this.ready=null}
- async makeWorker(){
-  let lastError;
-  for(const url of ENGINE_ASM_URLS){
-   try{
-    el.engine.textContent='Loading Stockfish…';
-    const response=await fetch(url,{mode:'cors',cache:'force-cache'});
-    if(!response.ok)throw new Error('HTTP '+response.status);
-    const source=await response.text();
-    if(!source||source.length<10000)throw new Error('Engine file was unexpectedly small');
-    const blobUrl=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
-    const worker=new Worker(blobUrl);
-    URL.revokeObjectURL(blobUrl);
-    return worker;
-   }catch(err){
-    console.warn('Stockfish source failed:',url,err);
-    lastError=err;
-   }
-  }
-  throw lastError||new Error('Could not load Stockfish');
- }
  init(){
   if(this.ready)return this.ready;
-  this.ready=new Promise(async(resolve,reject)=>{
+  this.ready=new Promise((resolve,reject)=>{
    try{
-    this.worker=await this.makeWorker();
+    this.worker=new Worker(ENGINE_PATH);
     const timer=setTimeout(()=>reject(new Error('Stockfish start timeout')),30000);
     const ready=e=>{
      const t=String(e.data||'');
