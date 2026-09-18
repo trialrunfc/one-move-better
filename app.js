@@ -1,7 +1,9 @@
 import { Chess } from 'https://cdn.jsdelivr.net/npm/chess.js@1.4.0/+esm';
 
-const ENGINE_JS='https://cdn.jsdelivr.net/npm/stockfish@19.0.0/bin/stockfish-19-lite-single.js';
-const ENGINE_WASM='https://cdn.jsdelivr.net/npm/stockfish@19.0.0/bin/stockfish-19-lite-single.wasm';
+const ENGINE_ASM_URLS=[
+  'https://cdn.jsdelivr.net/npm/stockfish@19.0.0/bin/stockfish-19-asm.js',
+  'https://cdn.jsdelivr.net/npm/stockfish@18.0.8/bin/stockfish-18-asm.js'
+];
 const HISTORY_KEY='omb-history-v1';
 const DEPTH=10;
 const ICON={wp:'♙',wn:'♘',wb:'♗',wr:'♖',wq:'♕',wk:'♔',bp:'♟',bn:'♞',bb:'♝',br:'♜',bq:'♛',bk:'♚'};
@@ -19,18 +21,40 @@ let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResul
 
 class Engine{
  constructor(){this.worker=null;this.pending=null;this.ready=null}
+ async makeWorker(){
+  let lastError;
+  for(const url of ENGINE_ASM_URLS){
+   try{
+    el.engine.textContent='Loading Stockfish…';
+    const response=await fetch(url,{mode:'cors',cache:'force-cache'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const source=await response.text();
+    if(!source||source.length<10000)throw new Error('Engine file was unexpectedly small');
+    const blobUrl=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
+    const worker=new Worker(blobUrl);
+    URL.revokeObjectURL(blobUrl);
+    return worker;
+   }catch(err){
+    console.warn('Stockfish source failed:',url,err);
+    lastError=err;
+   }
+  }
+  throw lastError||new Error('Could not load Stockfish');
+ }
  init(){
   if(this.ready)return this.ready;
-  this.ready=new Promise((resolve,reject)=>{
+  this.ready=new Promise(async(resolve,reject)=>{
    try{
-    const src="self.Module={locateFile:function(p){return p.endsWith('.wasm')?"+JSON.stringify(ENGINE_WASM)+":p}};importScripts("+JSON.stringify(ENGINE_JS)+");";
-    const url=URL.createObjectURL(new Blob([src],{type:'text/javascript'}));
-    this.worker=new Worker(url);URL.revokeObjectURL(url);
-    const timer=setTimeout(()=>reject(new Error('Stockfish start timeout')),15000);
+    this.worker=await this.makeWorker();
+    const timer=setTimeout(()=>reject(new Error('Stockfish start timeout')),30000);
     const ready=e=>{
      const t=String(e.data||'');
      if(t.includes('uciok'))this.worker.postMessage('isready');
-     if(t.includes('readyok')){clearTimeout(timer);this.worker.removeEventListener('message',ready);resolve()}
+     if(t.includes('readyok')){
+      clearTimeout(timer);
+      this.worker.removeEventListener('message',ready);
+      resolve();
+     }
     };
     this.worker.addEventListener('message',ready);
     this.worker.addEventListener('message',e=>this.onMessage(e.data));
@@ -59,15 +83,13 @@ class Engine{
   await this.init();
   if(this.pending)throw new Error('Engine busy');
   return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{this.worker.postMessage('stop');this.pending=null;reject(new Error('Analysis timeout'))},20000);
+   const timer=setTimeout(()=>{this.worker.postMessage('stop');this.pending=null;reject(new Error('Analysis timeout'))},25000);
    this.pending={info:null,done:v=>{clearTimeout(timer);resolve(v)}};
    this.worker.postMessage('position fen '+fen);
    this.worker.postMessage('go depth '+DEPTH)
   })
  }
 }
-const engine=new Engine();
-
 function status(msg){
  if(msg){el.status.textContent=msg;return}
  if(game.isCheckmate())el.status.textContent='Checkmate.';
