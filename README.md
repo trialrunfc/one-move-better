@@ -33,7 +33,7 @@ This prototype has no paid API and no database. Stockfish runs in the browser.
 ## Technical notes
 
 - Chess rules: chess.js 1.4.0 via jsDelivr.
-- Engine: Stockfish.js 19 lite single-threaded browser build via jsDelivr.
+- Engine: Stockfish.js 19 lite single-threaded browser build vendored locally in `engine/`.
 - Coaching text: rule-based for now.
 - Storage: browser localStorage.
 
@@ -43,6 +43,6 @@ Improve the "why?" layer: hanging pieces, removed defenders, forks, pins, missed
 
 ## Stockfish licence
 
-Stockfish.js is GPLv3 software. This prototype loads the published browser build from jsDelivr rather than redistributing the engine files.
+Stockfish.js is GPLv3 software. This prototype vendors the Stockfish 19 lite single-threaded browser build from the npm package `stockfish@19.0.0` into `engine/`, with the upstream licence notices retained.
 
-Deployment: GitHub Pages workflow configured.
+Deployment: GitHub Pages from the `main` branch root.
