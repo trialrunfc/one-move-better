@@ -11,10 +11,12 @@ const el={
  verdict:$('#verdict'),pill:$('#loss-pill'),main:$('#coach-main'),
  comparison:$('#comparison'),your:$('#your-move'),best:$('#best-move'),lessonBox:$('#lesson-box'),
  lesson:$('#lesson-text'),show:$('#show-better-btn'),reset:$('#reset-btn'),flip:$('#flip-btn'),
+ recapBtn:$('#recap-btn'),recapPanel:$('#recap-panel'),recapTitle:$('#recap-title'),
+ recapGood:$('#recap-good'),recapImprove:$('#recap-improve'),recapFocus:$('#recap-focus'),
  mode:$('#mode-select')
 };
 
-let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null,mode='computer';
+let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null,mode='computer',finished=false,gameNotes=[];
 
 class Engine{
  constructor(){this.worker=null;this.pending=null;this.ready=null}
@@ -72,6 +74,7 @@ const engine = new Engine();
 
 function status(msg){
  if(msg){el.status.textContent=msg;return}
+ if(finished){el.status.textContent='Game finished · recap below';return}
  if(game.isCheckmate())el.status.textContent='Checkmate.';
  else if(game.isDraw())el.status.textContent='Draw.';
  else if(mode==='computer')el.status.textContent=game.turn()==='w'?'Your turn · White':'Computer to move';
@@ -93,7 +96,7 @@ function render(){
   if(targets.includes(item.square))b.classList.add(p?'capture-target':'target');
   if(demo&&demo.from===item.square)b.classList.add('demo-from');
   if(demo&&demo.to===item.square)b.classList.add('demo-to');
-  b.disabled=busy||showingBetter||(mode==='computer'&&game.turn()==='b');
+  b.disabled=finished||busy||showingBetter||(mode==='computer'&&game.turn()==='b');
   b.setAttribute('aria-label',item.square);
   if(item.row===7){const s=document.createElement('span');s.className='coord file';s.textContent=item.square[0];b.appendChild(s)}
   if(item.col===0){const s=document.createElement('span');s.className='coord rank';s.textContent=item.square[1];b.appendChild(s)}
@@ -153,6 +156,113 @@ function coach(move,v,preFen,bestSan,isBest){
  ];
  return[alt[0],alt[1]];
 }
+function recordGameNote(move,loss,verdictName,player){
+ if(mode!=='computer'||player!=='w')return;
+ const ply=gameNotes.length+1;
+ gameNotes.push({
+  ply,
+  san:move.san,
+  piece:move.piece,
+  from:move.from,
+  to:move.to,
+  captured:move.captured||null,
+  castle:move.san.startsWith('O-O'),
+  centralPawn:move.piece==='p'&&['c4','d4','e4','c3','d3','e3'].includes(move.to),
+  loss:Number.isFinite(loss)?loss:null,
+  verdict:verdictName
+ });
+}
+
+function buildRecap(){
+ if(mode!=='computer'){
+  return{
+   title:'Personal recap unavailable',
+   good:'Free board lets you control both colours, so I cannot reliably tell which moves were yours.',
+   improve:'Switch to Play computer for a recap linked specifically to your decisions.',
+   focus:'Play a game against the computer, then finish the game or tap Finish & recap.'
+  };
+ }
+
+ const notes=gameNotes;
+ if(!notes.length){
+  return{
+   title:'No moves to recap yet',
+   good:'Make a few moves first so the recap has something real to work from.',
+   improve:'The recap only uses moves you actually played.',
+   focus:'Play at least four or five moves, then check again.'
+  };
+ }
+
+ const firstSix=notes.slice(0,6);
+ const firstTen=notes.slice(0,10);
+ const centralEarly=firstSix.filter(n=>n.centralPawn).length;
+ const minorStarts=new Set(['b1','g1','c1','f1']);
+ const developedBy6=new Set(firstSix.filter(n=>minorStarts.has(n.from)).map(n=>n.from));
+ const developedBy10=new Set(firstTen.filter(n=>minorStarts.has(n.from)).map(n=>n.from));
+ const castleNote=notes.find(n=>n.castle);
+ const pawnMovesBeforeTwoDev=(()=>{
+  let developed=new Set(),pawns=0;
+  for(const n of notes){
+   if(minorStarts.has(n.from))developed.add(n.from);
+   if(developed.size>=2)break;
+   if(n.piece==='p')pawns++;
+  }
+  return pawns;
+ })();
+ const earlyQueen=firstSix.some(n=>n.piece==='q');
+ const bestStrong=notes.filter(n=>['Best move','Strong move','Playable move'].includes(n.verdict)).length;
+ const mistakes=notes.filter(n=>['Mistake','Blunder'].includes(n.verdict)).length;
+ const blunders=notes.filter(n=>n.verdict==='Blunder').length;
+ const avgLoss=(()=>{
+  const vals=notes.map(n=>n.loss).filter(Number.isFinite);
+  return vals.length?vals.reduce((x,y)=>x+y,0)/vals.length:null;
+ })();
+
+ const good=[];
+ const improve=[];
+
+ if(centralEarly>=1)good.push('You used your pawns to claim or support the centre early rather than ignoring it.');
+ if(developedBy6.size>=2)good.push('You brought at least two minor pieces into the game within your first six moves.');
+ if(castleNote&&castleNote.ply<=8)good.push('You castled early enough to improve king safety and bring a rook closer to the game.');
+ if(mistakes===0&&notes.length>=4)good.push('You avoided major tactical mistakes in the moves analysed.');
+ if(bestStrong>=Math.ceil(notes.length*0.7)&&notes.length>=4)good.push('Most of your moves were sound according to the engine, so the game was not being lost through constant inaccuracies.');
+ if(!good.length)good.push('You kept the game playable and gave yourself positions to learn from rather than collapsing immediately.');
+
+ if(developedBy6.size<2&&notes.length>=5)improve.push('Your knights and bishops stayed on their starting squares for too long. Development should usually come before extra pawn moves.');
+ if(pawnMovesBeforeTwoDev>=4)improve.push('You made '+pawnMovesBeforeTwoDev+' pawn moves before developing two minor pieces, which cost useful opening time.');
+ if(!castleNote&&notes.length>=6)improve.push('You did not castle. That left your king in the centre and delayed connecting your rook to the game.');
+ else if(castleNote&&castleNote.ply>8)improve.push('You eventually castled, but only on your '+castleNote.ply+'th move. Earlier castling would usually make the position easier to handle.');
+ if(earlyQueen&&developedBy6.size<2)improve.push('Your queen moved before enough of your minor pieces were developed, which can make you spend extra moves defending or moving it again.');
+ if(mistakes>0)improve.push('There '+(mistakes===1?'was one move':'were '+mistakes+' moves')+' where the engine saw a significant drop in the position'+(blunders?'; '+blunders+' was classed as a blunder':'')+'.');
+ if(avgLoss!=null&&avgLoss>90&&mistakes===0)improve.push('Several moves were individually playable, but small losses accumulated. The next step is choosing more active moves when several options are safe.');
+ if(!improve.length)improve.push('There was no single recurring problem in this short game. The biggest gain now is making your sound moves more active and purposeful.');
+
+ let focus;
+ if(developedBy6.size<2||pawnMovesBeforeTwoDev>=4)focus='In your next game, try to develop two knights or bishops before making extra pawn moves. Then look to castle.';
+ else if(!castleNote||castleNote.ply>8)focus='In your next game, make king safety a checkpoint: develop the pieces between king and rook, then castle before starting a new attack.';
+ else if(mistakes>0)focus='Before each move next game, ask: “What checks, captures and threats does my opponent have if I play this?”';
+ else focus='Keep the same solid base, but look for moves that do two jobs at once: develop a piece while attacking, defending or preparing castling.';
+
+ let title='Game recap';
+ if(game.isCheckmate()){
+  title=game.turn()==='b'?'You won by checkmate':'You were checkmated';
+ }else if(game.isDraw())title='Draw · game recap';
+ else title='Practice recap so far';
+
+ return{title,good:good.slice(0,2).join(' '),improve:improve.slice(0,2).join(' '),focus};
+}
+
+function showRecap(forceFinish=false){
+ if(forceFinish)finished=true;
+ const r=buildRecap();
+ el.recapTitle.textContent=r.title;
+ el.recapGood.textContent=r.good;
+ el.recapImprove.textContent=r.improve;
+ el.recapFocus.textContent=r.focus;
+ el.recapPanel.classList.remove('hidden');
+ if(finished){selected=null;targets=[];render();status()}
+}
+
 function tone(name){
  el.verdict.style.color=name==='danger'?'var(--danger)':name==='warn'?'var(--warn)':'var(--good)'
 }
@@ -183,6 +293,7 @@ async function analyseMove(move,preFen,postFen){
   const postP=perspective(whiteScore(post,postFen),player);
   const loss=(preP==null||postP==null)?null:Math.max(0,preP-postP);
   const v=verdict(loss,isBest);
+  recordGameNote(move,loss,v.name,player);
   const c=coach(move,v,preFen,bestSan,isBest);
 
   lastResult={preFen,postFen,bestUci,bestSan};
@@ -204,9 +315,16 @@ async function analyseMove(move,preFen,postFen){
   if(bestUci&&!isBest&&mode==='free')el.show.classList.remove('hidden');
   else el.show.classList.add('hidden');
 
-  if(mode==='computer'&&player==='w'&&game.turn()==='b'&&!game.isGameOver()){
+  if(game.isGameOver()){
+   finished=true;
+   showRecap();
+  }else if(mode==='computer'&&player==='w'&&game.turn()==='b'){
    status('Computer thinking…');
    await playComputerMove(computerReply);
+   if(game.isGameOver()){
+    finished=true;
+    showRecap();
+   }
   }
  }catch(err){
   console.error(err);
@@ -244,7 +362,7 @@ async function playComputerMove(bestMove=null){
 }
 
 function clickSquare(square){
- if(busy||showingBetter)return;
+ if(finished||busy||showingBetter)return;
  if(mode==='computer'&&game.turn()==='b'){status('Computer thinking…');return}
  const p=game.get(square);
  if(!selected){
@@ -274,6 +392,9 @@ el.reset.addEventListener('click',()=>{
  selected=null;
  targets=[];
  busy=false;
+ finished=false;
+ gameNotes=[];
+ el.recapPanel.classList.add('hidden');
  el.last.textContent='No moves yet.';
  resetAnalysis();
  render();
@@ -281,10 +402,14 @@ el.reset.addEventListener('click',()=>{
 });
 el.flip.addEventListener('click',()=>{flipped=!flipped;render()});
 el.show.addEventListener('click',toggleBetter);
+el.recapBtn.addEventListener('click',()=>showRecap(true));
 el.mode.addEventListener('change',async()=>{
  mode=el.mode.value;
  selected=null;
  targets=[];
+ finished=false;
+ gameNotes=[];
+ el.recapPanel.classList.add('hidden');
  resetAnalysis();
  render();
  if(mode==='computer'&&game.turn()==='b'&&!game.isGameOver()){
