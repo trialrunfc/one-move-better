@@ -9,14 +9,17 @@ const $=s=>document.querySelector(s);
 const el={
  board:$('#board'),engine:$('#engine-status'),status:$('#position-status'),last:$('#last-move'),
  verdict:$('#verdict'),pill:$('#loss-pill'),main:$('#coach-main'),
- comparison:$('#comparison'),your:$('#your-move'),best:$('#best-move'),lessonBox:$('#lesson-box'),
+ comparison:$('#comparison'),your:$('#your-move'),best:$('#best-move'),
+ yourNotation:$('#your-notation'),bestNotation:$('#best-notation'),
+ thinkBox:$('#think-box'),thinkText:$('#think-text'),explain:$('#explain-btn'),
+ replyBox:$('#reply-box'),reply:$('#reply-text'),lessonBox:$('#lesson-box'),
  lesson:$('#lesson-text'),show:$('#show-better-btn'),reset:$('#reset-btn'),flip:$('#flip-btn'),
  recapBtn:$('#recap-btn'),recapPanel:$('#recap-panel'),recapTitle:$('#recap-title'),
  recapGood:$('#recap-good'),recapImprove:$('#recap-improve'),recapFocus:$('#recap-focus'),
  mode:$('#mode-select')
 };
 
-let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null,mode='computer',finished=false,gameNotes=[];
+let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null,mode='computer',finished=false,gameNotes=[],pendingExplanation=null;
 
 class Engine{
  constructor(){this.worker=null;this.pending=null;this.ready=null}
@@ -112,6 +115,156 @@ function whiteScore(result,fen){
  return fen.split(' ')[1]==='w'?n:-n
 }
 function perspective(score,color){return score==null?null:score*(color==='w'?1:-1)}
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const PIECE_NAME={p:'pawn',n:'knight',b:'bishop',r:'rook',q:'queen',k:'king'};
+
+function moveDetailsFromUci(fen,uci){
+ try{
+  const c=new Chess(fen),parts=uciParts(uci);
+  if(!parts)return null;
+  const move=c.move(parts);
+  if(!move)return null;
+  return{move,label:humanMoveLabel(move)};
+ }catch{return null}
+}
+
+function humanMoveLabel(move){
+ if(!move)return'';
+ if(move.san.startsWith('O-O-O'))return'Castle queenside';
+ if(move.san.startsWith('O-O'))return'Castle kingside';
+ const piece=PIECE_NAME[move.piece]||'piece';
+ if(move.piece==='p'){
+  if(move.captured)return'Capture on '+move.to+' with the '+move.from[0]+'-pawn';
+  return'Move the '+move.from[0]+'-pawn to '+move.to;
+ }
+ const startSquares={n:['b1','g1','b8','g8'],b:['c1','f1','c8','f8']};
+ if(startSquares[move.piece]?.includes(move.from)&&['c3','f3','c6','f6','b2','g2','b7','g7','c4','f4','c5','f5'].includes(move.to))
+  return'Develop the '+piece+' to '+move.to;
+ if(move.captured)return'Capture on '+move.to+' with the '+piece;
+ return'Move the '+piece+' to '+move.to;
+}
+
+function moveIdea(fen,move){
+ if(!move)return'It improves the position.';
+ const c=new Chess(fen);
+ const colour=move.color;
+ const enemy=colour==='w'?'b':'w';
+ const piece=PIECE_NAME[move.piece]||'piece';
+
+ if(move.san.startsWith('O-O'))return'It makes the king safer and brings a rook closer to the centre.';
+
+ if(move.piece==='p'){
+  const central=['d4','e4','d5','e5'];
+  if(central.includes(move.to)){
+   const bishop=move.from[0]==='e'?(colour==='w'?'f1':'f8'):(colour==='w'?'c1':'c8');
+   return'It claims central space and opens a line for the bishop on '+bishop+'.';
+  }
+  if(['d3','d6'].includes(move.to)){
+   const support=colour==='w'?'e4':'e5';
+   const supported=c.get(support);
+   const bishop=colour==='w'?'c1':'c8';
+   if(supported&&supported.color===colour&&supported.type==='p')
+    return'It supports the pawn on '+support+' and opens the bishop on '+bishop+', but it does not develop a new piece.';
+   return'It gives the centre extra support and opens the bishop on '+bishop+', but it does not develop a new piece.';
+  }
+  if(['e3','e6'].includes(move.to)){
+   const support=colour==='w'?'d4':'d5';
+   const supported=c.get(support);
+   const bishop=colour==='w'?'f1':'f8';
+   if(supported&&supported.color===colour&&supported.type==='p')
+    return'It supports the pawn on '+support+' and opens the bishop on '+bishop+', but it is a quieter developing choice.';
+   return'It opens the bishop on '+bishop+' and supports central squares, but it is a quieter move.';
+  }
+  if(move.captured)return'It forces an exchange immediately, but the value depends on what the opponent can recapture with.';
+  return'It changes the pawn structure and controls new squares, but it uses a move that could otherwise develop a piece.';
+ }
+
+ if(move.piece==='n'){
+  const reasons=[];
+  if(['f3','c3','f6','c6'].includes(move.to))reasons.push('develops a knight toward the centre');
+  const targets={
+   f3:['e5','d4'],c3:['e4','d5'],f6:['e4','d5'],c6:['e5','d4']
+  }[move.to]||[];
+  const attacked=targets.find(sq=>{const p=c.get(sq);return p&&p.color===enemy});
+  if(attacked)reasons.push('attacks the piece on '+attacked);
+  if(targets.length)reasons.push('controls important central squares');
+  if((colour==='w'&&move.from==='g1')||(colour==='b'&&move.from==='g8'))reasons.push('helps clear the way to castle');
+  if(reasons.length)return'It '+reasons.join(', ').replace(/, ([^,]*)$/, ' and $1')+'.';
+  return'It improves the knight’s activity and gives it influence over more useful squares.';
+ }
+
+ if(move.piece==='b'){
+  const reasons=['develops a bishop onto an active diagonal'];
+  if((colour==='w'&&move.from==='f1')||(colour==='b'&&move.from==='f8'))reasons.push('helps clear the way to castle');
+  return'It '+reasons.join(' and ')+'.';
+ }
+
+ if(move.captured)return'It wins or exchanges material immediately, but you still need to check the opponent’s best recapture.';
+ if(move.san.includes('+'))return'It gives check, so the opponent has to respond immediately.';
+ if(move.piece==='q')return'It makes the queen more active, although early queen moves can lose time if the opponent attacks it.';
+ if(move.piece==='r')return'It activates a rook and puts more pressure on an open or useful file.';
+ if(move.piece==='k')return'It changes king safety, so the important question is whether the king is safer on the new square.';
+ return'It improves '+piece+' activity.';
+}
+
+function continuationText(fen,pv){
+ if(!Array.isArray(pv)||pv.length<2)return'No clear reply line was available at this search depth.';
+ const c=new Chess(fen),steps=[];
+ for(const uci of pv.slice(0,3)){
+  try{
+   const m=c.move(uciParts(uci));
+   if(!m)break;
+   steps.push({move:m,label:humanMoveLabel(m)});
+  }catch{break}
+ }
+ if(steps.length<2)return'No clear reply line was available at this search depth.';
+ let text='If you choose '+steps[0].label.toLowerCase()+' ('+steps[0].move.san+'), the opponent’s best reply is '+steps[1].label.toLowerCase()+' ('+steps[1].move.san+').';
+ if(steps[0].move.captured&&steps[1].move.captured&&steps[0].move.to===steps[1].move.to)
+  text+=' So the capture is not about winning material for free; the recapture is part of the idea.';
+ if(steps[2])text+=' A likely continuation is '+steps[2].label.toLowerCase()+' ('+steps[2].move.san+').';
+ return text;
+}
+
+function questionFor(bestDetails){
+ if(!bestDetails)return'What does the alternative improve that your move does not?';
+ const m=bestDetails.move;
+ if(m.piece==='n'&&['f3','c3','f6','c6'].includes(m.to))return'Why might developing the knight to '+m.to+' be more useful here than another pawn move?';
+ if(m.san.startsWith('O-O'))return'What would castling improve besides moving the king?';
+ if(m.captured)return'If you make this capture, what is the opponent’s best reply?';
+ if(m.piece==='p'&&['d4','e4','d5','e5'].includes(m.to))return'What does this central pawn move open up for your other pieces?';
+ return'What does this move improve: development, centre control, king safety, pressure or defence?';
+}
+
+function principleFor(move,bestDetails,isBest){
+ if(isBest&&move.piece==='n')return'Good development often does more than one job: improve a piece, influence the centre and prepare king safety.';
+ if(isBest&&move.piece==='p'&&['d4','e4','d5','e5'].includes(move.to))return'Central pawn moves are strongest when they gain space and help your pieces come out.';
+ if(bestDetails?.move.piece==='n')return'When two moves are safe, prefer the one that develops a piece while creating another useful effect.';
+ if(bestDetails?.move.san.startsWith('O-O'))return'King safety is also development: castling usually improves both the king and a rook at once.';
+ if(bestDetails?.move.captured)return'For every capture, picture the opponent’s best recapture before deciding what the exchange achieves.';
+ return'Compare moves by what they achieve, not just by whether the engine ranks one slightly higher.';
+}
+
+function revealExplanation(data){
+ pendingExplanation=null;
+ el.thinkBox.classList.add('hidden');
+ el.main.textContent=data.main;
+ if(data.isBest){
+  el.comparison.classList.add('hidden');
+ }else{
+  el.your.textContent=data.yourLabel;
+  el.yourNotation.textContent='Notation: '+data.yourSan;
+  el.best.textContent=data.bestLabel;
+  el.bestNotation.textContent='Notation: '+data.bestSan;
+  el.comparison.classList.remove('hidden');
+ }
+ el.lesson.textContent=data.principle;
+ el.lessonBox.classList.remove('hidden');
+ if(data.reply){
+  el.reply.textContent=data.reply;
+  el.replyBox.classList.remove('hidden');
+ }else el.replyBox.classList.add('hidden');
+}
+
 function verdict(loss,best){
  if(best)return{name:'Best move',tone:'good'};
  if(!Number.isFinite(loss)||loss<=35)return{name:'Strong move',tone:'good'};
@@ -120,42 +273,33 @@ function verdict(loss,best){
  if(loss<=320)return{name:'Mistake',tone:'warn'};
  return{name:'Blunder',tone:'danger'}
 }
-function alternativeIdea(bestSan,preFen){
- const san=(bestSan||'').replace(/[+#]/g,'');
- if(['Nf3','Nf6'].includes(san))return['The knight move develops a piece toward the centre and also helps prepare castling.','Look for moves that improve a piece while doing something else useful at the same time.'];
- if(['Nc3','Nc6'].includes(san))return['The knight move develops a piece toward the centre instead of spending another tempo on a pawn.','In the opening, compare pawn moves with developing moves before committing.'];
- if(san==='c5')return['c5 challenges White’s centre from the side straight away.','The point is not to win a pawn immediately — it is to put pressure on the centre and create an active position.'];
- if(san==='c4')return['c4 puts pressure on the centre from the side and gains useful space.','Ask what central square the move influences, not just what it attacks immediately.'];
- if(['e4','d4','e5','d5'].includes(san))return['The engine prefers a direct claim on the centre.','Central pawn moves are often strong because they gain space while opening lines for your pieces.'];
- if(san.startsWith('O-O'))return['The engine prefers getting the king safe and bringing the rook closer to the game.','When several moves are playable, king safety can be the most useful improvement.'];
- if(san.includes('x'))return['The engine prefers an immediate capture, but the point may be the position after the recapture rather than simply winning material.','Before judging a capture, picture the opponent’s best recapture and one move beyond it.'];
- return['Stockfish prefers '+bestSan+' because it makes a more useful improvement in this position.','Compare the two moves by asking: which develops, attacks, defends or improves king safety more efficiently?'];
+function buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,preAnalysis){
+ const bestDetails=moveDetailsFromUci(preFen,bestUci);
+ const yourLabel=humanMoveLabel(move);
+ const yourIdea=moveIdea(preFen,move);
+ const bestLabel=bestDetails?bestDetails.label:(bestSan||'Alternative move');
+ const bestIdea=bestDetails?moveIdea(preFen,bestDetails.move):'It improves the position more efficiently.';
+
+ let main;
+ if(isBest){
+  main=yourLabel+'. '+yourIdea;
+ }else{
+  main='Your idea: '+yourLabel+'. '+yourIdea+' Alternative: '+bestLabel+'. '+bestIdea;
+ }
+
+ return{
+  main,
+  isBest,
+  yourLabel,
+  yourSan:move.san,
+  bestLabel,
+  bestSan,
+  reply:continuationText(preFen,preAnalysis?.pv),
+  principle:principleFor(move,bestDetails,isBest),
+  question:questionFor(bestDetails)
+ };
 }
 
-function coach(move,v,preFen,bestSan,isBest){
- if(isBest){
-  if(move.san.includes('O-O'))return['You got your king safer and brought your rook closer to the game.','What to notice: which piece can become more active now?'];
-  if(move.piece==='p'&&['e4','d4','e5','d5'].includes(move.to)){
-   const side=move.from[0]==='e'?'king-side bishop':'queen-side bishop';
-   return['Strong opening move. '+move.san.replace(/[+#]/g,'')+' takes central space and frees your '+side+'.','What to notice: which piece is now easier to develop?'];
-  }
-  if(move.piece==='p'&&['c4','c5'].includes(move.to))
-   return['Strong opening move. It fights for the centre from the side rather than occupying it immediately.','What to notice: which central pawn is this move challenging?'];
-  if(move.piece==='n'&&['f3','c3','f6','c6'].includes(move.to)){
-   const castle=(move.to==='f3'||move.to==='f6')?' and helps prepare castling':'';
-   return['Strong developing move. The knight moves toward the centre'+castle+'.','What to notice: what can the knight influence from its new square?'];
-  }
-  if(move.captured)return['This was a strong capture in the position.','What to notice: after the opponent’s best reply, what have you actually gained — material, activity or position?'];
-  if(move.san.includes('+'))return['This was a useful forcing move because the opponent has to answer your check.','What to notice: does the check improve your position after their best reply?'];
-  return['That was Stockfish’s first choice, and it improves your position efficiently.','What to notice: what did the move improve — space, activity, king safety, pressure or defence?'];
- }
- const alt=alternativeIdea(bestSan,preFen);
- if(v.name==='Strong move'||v.name==='Playable move')return[
-  'Your move is sound. Stockfish slightly prefers '+bestSan+'. '+alt[0],
-  alt[1]
- ];
- return[alt[0],alt[1]];
-}
 function recordGameNote(move,loss,verdictName,player){
  if(mode!=='computer'||player!=='w')return;
  const ply=gameNotes.length+1;
@@ -269,8 +413,9 @@ function tone(name){
 function resetAnalysis(){
  el.verdict.textContent='Make a move';el.verdict.style.color='';
  el.pill.classList.add('hidden');el.comparison.classList.add('hidden');el.lessonBox.classList.add('hidden');el.show.classList.add('hidden');
- el.main.textContent="I'll compare your move with Stockfish and give you one useful thing to remember.";
- lastResult=null;showingBetter=false;demo=null
+ el.thinkBox.classList.add('hidden');el.replyBox.classList.add('hidden');
+ el.main.textContent="I'll explain what your move changes in the position and what another strong idea would achieve.";
+ pendingExplanation=null;lastResult=null;showingBetter=false;demo=null
 }
 async function analyseMove(move,preFen,postFen){
  busy=true;
@@ -294,18 +439,25 @@ async function analyseMove(move,preFen,postFen){
   const loss=(preP==null||postP==null)?null:Math.max(0,preP-postP);
   const v=verdict(loss,isBest);
   recordGameNote(move,loss,v.name,player);
-  const c=coach(move,v,preFen,bestSan,isBest);
+  const explanation=buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,pre);
 
   lastResult={preFen,postFen,bestUci,bestSan};
   el.verdict.textContent=v.name;
   tone(v.tone);
-  el.main.textContent=c[0];
-  el.your.textContent=move.san;
-  el.best.textContent=bestSan;
-  if(isBest)el.comparison.classList.add('hidden');
-  else el.comparison.classList.remove('hidden');
-  el.lesson.textContent=c[1];
-  el.lessonBox.classList.remove('hidden');
+  el.comparison.classList.add('hidden');
+  el.lessonBox.classList.add('hidden');
+  el.replyBox.classList.add('hidden');
+  el.thinkBox.classList.add('hidden');
+
+  const askFirst=!isBest&&['Strong move','Playable move','Inaccuracy'].includes(v.name);
+  if(askFirst){
+   pendingExplanation=explanation;
+   el.main.textContent='Your move is playable. Before I explain the alternative, think about this:';
+   el.thinkText.textContent=explanation.question;
+   el.thinkBox.classList.remove('hidden');
+  }else{
+   revealExplanation(explanation);
+  }
 
   if(loss!=null&&!isBest&&loss>35){
    el.pill.textContent=loss<=90?'small engine preference':loss<=180?'worth comparing':'important difference';
@@ -344,6 +496,7 @@ async function playComputerMove(bestMove=null){
  status('Computer thinking…');
  el.last.textContent='Computer is thinking…';
  render();
+ await wait(1000);
  try{
   let uci=bestMove;
   if(!uci){
@@ -394,6 +547,7 @@ el.reset.addEventListener('click',()=>{
  busy=false;
  finished=false;
  gameNotes=[];
+ pendingExplanation=null;
  el.recapPanel.classList.add('hidden');
  el.last.textContent='No moves yet.';
  resetAnalysis();
@@ -402,6 +556,7 @@ el.reset.addEventListener('click',()=>{
 });
 el.flip.addEventListener('click',()=>{flipped=!flipped;render()});
 el.show.addEventListener('click',toggleBetter);
+el.explain.addEventListener('click',()=>{if(pendingExplanation)revealExplanation(pendingExplanation)});
 el.recapBtn.addEventListener('click',()=>showRecap(true));
 el.mode.addEventListener('change',async()=>{
  mode=el.mode.value;
@@ -409,6 +564,7 @@ el.mode.addEventListener('change',async()=>{
  targets=[];
  finished=false;
  gameNotes=[];
+ pendingExplanation=null;
  el.recapPanel.classList.add('hidden');
  resetAnalysis();
  render();
