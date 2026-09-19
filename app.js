@@ -194,8 +194,118 @@ function humanMoveLabel(move){
  return'Move the '+piece+' to '+move.to;
 }
 
+function squareCoords(square){
+ return{f:square.charCodeAt(0)-97,r:Number(square[1])-1};
+}
+function coordsSquare(f,r){
+ return f>=0&&f<8&&r>=0&&r<8?String.fromCharCode(97+f)+String(r+1):null;
+}
+function isSquareAttacked(board,square,byColor){
+ const target=squareCoords(square);
+ const knight=[[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]];
+ const king=[[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+ const diag=[[1,1],[1,-1],[-1,1],[-1,-1]];
+ const orth=[[1,0],[-1,0],[0,1],[0,-1]];
+
+ for(const [df,dr] of knight){
+  const sq=coordsSquare(target.f+df,target.r+dr),p=sq&&board.get(sq);
+  if(p&&p.color===byColor&&p.type==='n')return true;
+ }
+ for(const [df,dr] of king){
+  const sq=coordsSquare(target.f+df,target.r+dr),p=sq&&board.get(sq);
+  if(p&&p.color===byColor&&p.type==='k')return true;
+ }
+
+ const pawnFromRank=target.r+(byColor==='w'?-1:1);
+ for(const df of [-1,1]){
+  const sq=coordsSquare(target.f+df,pawnFromRank),p=sq&&board.get(sq);
+  if(p&&p.color===byColor&&p.type==='p')return true;
+ }
+
+ for(const [df,dr] of diag){
+  let f=target.f+df,r=target.r+dr;
+  while(f>=0&&f<8&&r>=0&&r<8){
+   const sq=coordsSquare(f,r),p=board.get(sq);
+   if(p){
+    if(p.color===byColor&&(p.type==='b'||p.type==='q'))return true;
+    break;
+   }
+   f+=df;r+=dr;
+  }
+ }
+ for(const [df,dr] of orth){
+  let f=target.f+df,r=target.r+dr;
+  while(f>=0&&f<8&&r>=0&&r<8){
+   const sq=coordsSquare(f,r),p=board.get(sq);
+   if(p){
+    if(p.color===byColor&&(p.type==='r'||p.type==='q'))return true;
+    break;
+   }
+   f+=df;r+=dr;
+  }
+ }
+ return false;
+}
+
+function attackedPieces(board,color){
+ const enemy=color==='w'?'b':'w',out=[];
+ for(let f=0;f<8;f++)for(let r=0;r<8;r++){
+  const sq=coordsSquare(f,r),p=board.get(sq);
+  if(p&&p.color===color&&p.type!=='k'&&isSquareAttacked(board,sq,enemy))out.push({square:sq,piece:p});
+ }
+ return out;
+}
+
+function defensiveContext(preFen,move){
+ try{
+  const pre=new Chess(preFen);
+  const color=move.color,enemy=color==='w'?'b':'w';
+  const beforeAttacked=attackedPieces(pre,color);
+  const sourceWasAttacked=isSquareAttacked(pre,move.from,enemy);
+  const wasInCheck=pre.inCheck();
+
+  const post=new Chess(preFen);
+  post.move({from:move.from,to:move.to,promotion:move.promotion||'q'});
+  const afterAttacked=attackedPieces(post,color);
+  const destinationAttacked=isSquareAttacked(post,move.to,enemy);
+  const piece=PIECE_NAME[move.piece]||'piece';
+
+  if(wasInCheck){
+   return{
+    kind:'check',
+    text:'You were in check, so this move had to deal with an immediate threat to your king.',
+    question:'You were in check. What part of your move removed that threat?'
+   };
+  }
+  if(sourceWasAttacked&&!destinationAttacked){
+   return{
+    kind:'escape',
+    text:'Your '+piece+' on '+move.from+' was under attack, and you moved it to a safer square on '+move.to+'.',
+    question:'Your '+piece+' on '+move.from+' was under attack. What would happen if you ignored that threat?'
+   };
+  }
+  if(sourceWasAttacked&&move.captured){
+   return{
+    kind:'counter',
+    text:'Your '+piece+' was under attack, and you answered the threat with a capture rather than simply retreating.',
+    question:'Your '+piece+' was under attack. Does this capture actually solve the threat after the opponent replies?'
+   };
+  }
+  if(afterAttacked.length<beforeAttacked.length){
+   return{
+    kind:'reduce',
+    text:'This move reduced the number of your pieces under direct attack, so there is a real defensive idea behind it.',
+    question:'Which of your pieces became safer after this move?'
+   };
+  }
+  return null;
+ }catch{return null}
+}
+
 function moveIdea(fen,move){
  if(!move)return'It improves the position.';
+ const defence=defensiveContext(fen,move);
+ if(defence)return defence.text;
  const c=new Chess(fen);
  const colour=move.color;
  const enemy=colour==='w'?'b':'w';
@@ -275,14 +385,15 @@ function continuationText(fen,pv){
  return text;
 }
 
-function questionFor(bestDetails){
- if(!bestDetails)return'What does the alternative improve that your move does not?';
+function questionFor(bestDetails,defence){
+ if(defence?.question)return defence.question;
+ if(!bestDetails)return null;
  const m=bestDetails.move;
- if(m.piece==='n'&&['f3','c3','f6','c6'].includes(m.to))return'Why might developing the knight to '+m.to+' be more useful here than another pawn move?';
- if(m.san.startsWith('O-O'))return'What would castling improve besides moving the king?';
- if(m.captured)return'If you make this capture, what is the opponent’s best reply?';
+ if(m.piece==='n'&&['f3','c3','f6','c6'].includes(m.to))return'What useful jobs would the knight do from '+m.to+' besides simply moving off its starting square?';
+ if(m.san.startsWith('O-O'))return'What does castling improve besides moving the king?';
+ if(m.captured)return'If you make this capture, what is the opponent’s best recapture or reply?';
  if(m.piece==='p'&&['d4','e4','d5','e5'].includes(m.to))return'What does this central pawn move open up for your other pieces?';
- return'What does this move improve: development, centre control, king safety, pressure or defence?';
+ return null;
 }
 
 function principleFor(move,bestDetails,isBest){
@@ -329,6 +440,7 @@ function verdict(loss,best){
 }
 function buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,preAnalysis,verdictName){
  const bestDetails=moveDetailsFromUci(preFen,bestUci);
+ const defence=defensiveContext(preFen,move);
  const yourLabel=humanMoveLabel(move);
  const yourIdea=moveIdea(preFen,move);
  const bestLabel=bestDetails?bestDetails.label:(bestSan||'Alternative move');
@@ -340,6 +452,8 @@ function buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,preAnalysis,ver
   main=yourLabel+'. '+yourIdea;
  }else if(smallPreference){
   main=yourLabel+'. '+yourIdea+' This is a sound choice in this position.';
+ }else if(defence){
+  main='Your defensive idea makes sense: '+defence.text+' The issue is that, in this exact position, '+bestLabel.toLowerCase()+' is stronger because '+bestIdea.charAt(0).toLowerCase()+bestIdea.slice(1);
  }else{
   main='Your idea: '+yourLabel+'. '+yourIdea+' In this exact position, '+bestLabel.toLowerCase()+' is stronger because '+bestIdea.charAt(0).toLowerCase()+bestIdea.slice(1);
  }
@@ -348,6 +462,7 @@ function buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,preAnalysis,ver
   main,
   isBest,
   smallPreference,
+  defence,
   yourLabel,
   yourSan:move.san,
   bestLabel,
@@ -356,7 +471,7 @@ function buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,preAnalysis,ver
   principle:smallPreference
     ? principleFor(move,null,true)
     : principleFor(move,bestDetails,isBest),
-  question:questionFor(bestDetails)
+  question:questionFor(bestDetails,defence)
  };
 }
 
@@ -532,10 +647,10 @@ async function analyseMove(move,preFen,postFen){
    if(el.replyBox)el.replyBox.classList.add('hidden');
    if(el.thinkBox)el.thinkBox.classList.add('hidden');
 
-   const askFirst=!isBest&&['Inaccuracy','Mistake','Blunder'].includes(v.name);
+   const askFirst=!isBest&&Boolean(explanation.question)&&['Inaccuracy','Mistake','Blunder'].includes(v.name);
    if(askFirst){
     pendingExplanation=explanation;
-    el.main.textContent='Your move is playable. Before I explain the alternative, think about this:';
+    el.main.textContent='Before I explain the alternative, one concrete question about this position:';
     if(el.thinkText)el.thinkText.textContent=explanation.question;
     if(el.thinkBox)el.thinkBox.classList.remove('hidden');
     else revealExplanation(explanation);
