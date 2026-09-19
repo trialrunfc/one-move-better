@@ -35,3 +35,11 @@ footer{margin-top:26px;border-top:1px solid var(--border);padding-top:16px;color
 .recap-block span,.recap-focus span{font-size:.69rem;letter-spacing:.09em;font-weight:850;color:var(--muted)}
 .recap-block p,.recap-focus p{margin:6px 0 0;line-height:1.5}
 .recap-focus{border-left:4px solid var(--accent);background:var(--accent-soft)}
+
+.think-box,.reply-box{margin:14px 0;padding:13px 14px;border-radius:9px;background:var(--soft)}
+.think-box{border-left:4px solid var(--warn)}
+.think-box span,.reply-box span{font-size:.69rem;letter-spacing:.09em;font-weight:850;color:var(--muted)}
+.think-box p,.reply-box p{margin:6px 0 10px;line-height:1.5}
+.reply-box{border-left:4px solid var(--accent)}
+.notation{display:block;margin-top:5px;color:var(--muted);font-size:.74rem;font-weight:650}
+.comparison strong{display:block;font-size:1rem;line-height:1.35}
