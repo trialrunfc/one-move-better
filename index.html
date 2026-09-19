@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="One Move Better: a free beginner-friendly chess coach.">
   <title>One Move Better</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <main class="app-shell">
@@ -24,28 +24,15 @@
         <div class="board-actions">
           <button id="reset-btn" type="button" class="button primary">New game</button>
           <button id="flip-btn" type="button" class="button">Flip board</button>
-          <select id="computer-level" class="compact-select" aria-label="Play computer">
-            <option value="off">Coach only</option>
-            <option value="on">Play computer</option>
+          <select id="mode-select" class="compact-select" aria-label="Game mode">
+            <option value="computer" selected>Play computer</option>
+            <option value="free">Free board · both sides</option>
           </select>
         </div>
         <p class="small-note">Tap a piece, then its destination. Analysis happens in your browser.</p>
       </div>
 
       <div class="coach-column">
-        <section class="panel">
-          <label for="intent"><strong>What are you trying to do?</strong> <span class="optional">Optional</span></label>
-          <select id="intent">
-            <option value="unsure">I'm not sure</option>
-            <option value="develop">Develop a piece</option>
-            <option value="attack">Attack something</option>
-            <option value="defend">Defend something</option>
-            <option value="castle">Protect my king / prepare to castle</option>
-            <option value="material">Win material</option>
-            <option value="position">Improve my position</option>
-          </select>
-        </section>
-
         <section class="panel">
           <p class="panel-kicker">POSITION</p>
           <p id="position-status" class="position-status">White to move.</p>
@@ -75,18 +62,6 @@
 
           <button id="show-better-btn" type="button" class="button primary hidden">Show me the better move</button>
         </section>
-
-        <section class="panel">
-          <div class="history-heading">
-            <div>
-              <p class="panel-kicker">YOUR PATTERNS</p>
-              <h2>Recent lessons</h2>
-            </div>
-            <button id="clear-history-btn" type="button" class="text-button">Clear</button>
-          </div>
-          <p id="history-empty" class="muted">Your lessons will appear here.</p>
-          <ol id="history-list" class="history-list"></ol>
-        </section>
       </div>
     </section>
 
@@ -94,6 +69,6 @@
       <p>Stockfish calculates the chess. One Move Better turns the result into beginner-friendly coaching.</p>
     </footer>
   </main>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=8"></script>
 </body>
 </html>
