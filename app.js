@@ -8,14 +8,13 @@ const ICON={wp:'♙',wn:'♘',wb:'♗',wr:'♖',wq:'♕',wk:'♔',bp:'♟',bn:'�
 const $=s=>document.querySelector(s);
 const el={
  board:$('#board'),engine:$('#engine-status'),status:$('#position-status'),last:$('#last-move'),
- intent:$('#intent'),verdict:$('#verdict'),pill:$('#loss-pill'),main:$('#coach-main'),
+ verdict:$('#verdict'),pill:$('#loss-pill'),main:$('#coach-main'),
  comparison:$('#comparison'),your:$('#your-move'),best:$('#best-move'),lessonBox:$('#lesson-box'),
  lesson:$('#lesson-text'),show:$('#show-better-btn'),reset:$('#reset-btn'),flip:$('#flip-btn'),
- history:$('#history-list'),historyEmpty:$('#history-empty'),clear:$('#clear-history-btn'),
- computer:$('#computer-level')
+ mode:$('#mode-select')
 };
 
-let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null,computerLevel='off';
+let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResult=null,showingBetter=false,demo=null,mode='computer';
 
 class Engine{
  constructor(){this.worker=null;this.pending=null;this.ready=null}
@@ -75,7 +74,8 @@ function status(msg){
  if(msg){el.status.textContent=msg;return}
  if(game.isCheckmate())el.status.textContent='Checkmate.';
  else if(game.isDraw())el.status.textContent='Draw.';
- else el.status.textContent=(game.turn()==='w'?'White':'Black')+' to move'+(game.inCheck()?' — check!':'.')
+ else if(mode==='computer')el.status.textContent=game.turn()==='w'?'Your turn · White':'Computer to move';
+ else el.status.textContent=(game.turn()==='w'?'White':'Black')+' to move · you control both sides'+(game.inCheck()?' · check!':'')
 }
 function squareName(f,r){return String.fromCharCode(97+f)+String(8-r)}
 function displaySquares(){
@@ -93,7 +93,7 @@ function render(){
   if(targets.includes(item.square))b.classList.add(p?'capture-target':'target');
   if(demo&&demo.from===item.square)b.classList.add('demo-from');
   if(demo&&demo.to===item.square)b.classList.add('demo-to');
-  b.disabled=busy||showingBetter;
+  b.disabled=busy||showingBetter||(mode==='computer'&&game.turn()==='b');
   b.setAttribute('aria-label',item.square);
   if(item.row===7){const s=document.createElement('span');s.className='coord file';s.textContent=item.square[0];b.appendChild(s)}
   if(item.col===0){const s=document.createElement('span');s.className='coord rank';s.textContent=item.square[1];b.appendChild(s)}
@@ -111,33 +111,12 @@ function whiteScore(result,fen){
 function perspective(score,color){return score==null?null:score*(color==='w'?1:-1)}
 function verdict(loss,best){
  if(best)return{name:'Best move',tone:'good'};
- if(!Number.isFinite(loss)||loss<=30)return{name:'Good move',tone:'good'};
- if(loss<=85)return{name:'Small inaccuracy',tone:'warn'};
- if(loss<=190)return{name:'Mistake',tone:'warn'};
+ if(!Number.isFinite(loss)||loss<=35)return{name:'Strong move',tone:'good'};
+ if(loss<=90)return{name:'Playable move',tone:'good'};
+ if(loss<=180)return{name:'Inaccuracy',tone:'warn'};
+ if(loss<=320)return{name:'Mistake',tone:'warn'};
  return{name:'Blunder',tone:'danger'}
 }
-function openingIdea(move){
- const san=move.san.replace(/[+#]/g,'');
- if(move.san.includes('O-O'))return['You got your king safer and connected a rook to the game.','What to notice: once your king is safe, which piece can become more active?'];
- if(move.piece==='p'&&['e4','d4','e5','d5'].includes(move.to)){
-  const bishop=move.from[0]==='e'?'bishop on the king side':'bishop on the queen side';
-  return['This claims space in the centre and opens a line for your '+bishop+'.','What to notice: which piece can you develop now that this pawn has moved?'];
- }
- if(move.piece==='p'&&['c4','c5'].includes(move.to))
-  return['This fights for the centre from the side instead of occupying it immediately.','What to notice: which central pawn is this move putting pressure on?'];
- if(move.piece==='n'&&['f3','c3','f6','c6'].includes(move.to)){
-  const extra=(move.to==='f3'||move.to==='f6')?' and helps clear the way to castle':'';
-  return['You developed a knight toward the centre'+extra+'.','What to notice: what central squares and enemy pieces can that knight now influence?'];
- }
- if(move.piece==='b'&&opening)
-  return['You brought a bishop into the game instead of leaving it behind the pawns.','What to notice: what squares does the bishop now control, and does this help you castle?'];
- if(move.captured)
-  return['You chose a forcing move by taking material.','What to notice: can the opponent simply recapture, or does the exchange improve your position?'];
- if(move.san.includes('+'))
-  return['You made the opponent answer a check immediately.','What to notice: after their best reply, is your position actually better?'];
- return['Stockfish likes this move because it improves your position without giving the opponent an obvious forcing reply.','What to notice: what changed after the move — space, activity, king safety, pressure or defence?'];
-}
-
 function alternativeIdea(bestSan,preFen){
  const san=(bestSan||'').replace(/[+#]/g,'');
  if(['Nf3','Nf6'].includes(san))return['The knight move develops a piece toward the centre and also helps prepare castling.','Look for moves that improve a piece while doing something else useful at the same time.'];
@@ -150,8 +129,7 @@ function alternativeIdea(bestSan,preFen){
  return['Stockfish prefers '+bestSan+' because it makes a more useful improvement in this position.','Compare the two moves by asking: which develops, attacks, defends or improves king safety more efficiently?'];
 }
 
-function coach(move,intent,v,preFen,bestSan,isBest){
- const opening=game.history().length<=16;
+function coach(move,v,preFen,bestSan,isBest){
  if(isBest){
   if(move.san.includes('O-O'))return['You got your king safer and brought your rook closer to the game.','What to notice: which piece can become more active now?'];
   if(move.piece==='p'&&['e4','d4','e5','d5'].includes(move.to)){
@@ -169,12 +147,10 @@ function coach(move,intent,v,preFen,bestSan,isBest){
   return['That was Stockfish’s first choice, and it improves your position efficiently.','What to notice: what did the move improve — space, activity, king safety, pressure or defence?'];
  }
  const alt=alternativeIdea(bestSan,preFen);
- if(v.name==='Good move')return['Your move is good. Stockfish slightly prefers '+bestSan+', mainly because '+alt[0].charAt(0).toLowerCase()+alt[0].slice(1),alt[1]];
- if(intent==='develop'&&opening)return['Your development idea was sensible, but '+bestSan+' is more efficient here.','Compare what each move develops, attacks or prepares before choosing.'];
- if(intent==='castle')return['King safety is a good priority, but '+bestSan+' improves the position more immediately.',alt[1]];
- if(intent==='attack')return['The attacking idea makes sense, but '+bestSan+' creates a stronger problem for the opponent.',alt[1]];
- if(intent==='material')return['You were looking for material, but '+bestSan+' gives the position something more useful.',alt[1]];
- if(intent==='defend')return['You saw that defence mattered, but '+bestSan+' solves the position more efficiently.',alt[1]];
+ if(v.name==='Strong move'||v.name==='Playable move')return[
+  'Your move is sound. Stockfish slightly prefers '+bestSan+'. '+alt[0],
+  alt[1]
+ ];
  return[alt[0],alt[1]];
 }
 function tone(name){
@@ -186,39 +162,67 @@ function resetAnalysis(){
  el.main.textContent="I'll compare your move with Stockfish and give you one useful thing to remember.";
  lastResult=null;showingBetter=false;demo=null
 }
-async function analyseMove(move,preFen,postFen,intent){
- busy=true;render();status('Analysing your move…');el.verdict.textContent='Thinking…';el.main.textContent='Stockfish is comparing your move with the best option.';
+async function analyseMove(move,preFen,postFen){
+ busy=true;
+ render();
+ status('Analysing '+move.san+'…');
+ el.verdict.textContent='Thinking…';
+ el.main.textContent='Comparing your move with the strongest alternatives.';
  let computerReply=null;
  try{
   const pre=await engine.analyse(preFen);
   const post=await engine.analyse(postFen);
   computerReply=post&&post.bestMove?post.bestMove:null;
-  const player=preFen.split(' ')[1],bestUci=pre.bestMove,bestSan=sanFor(preFen,bestUci)||'—';
+
+  const player=preFen.split(' ')[1];
+  const bestUci=pre.bestMove;
+  const bestSan=sanFor(preFen,bestUci)||'—';
   const playedUci=move.from+move.to+(move.promotion||'');
   const isBest=playedUci===bestUci;
-  const preP=perspective(whiteScore(pre,preFen),player),postP=perspective(whiteScore(post,postFen),player);
+  const preP=perspective(whiteScore(pre,preFen),player);
+  const postP=perspective(whiteScore(post,postFen),player);
   const loss=(preP==null||postP==null)?null:Math.max(0,preP-postP);
-  const v=verdict(loss,isBest),c=coach(move,intent,v,preFen,bestSan,isBest);
+  const v=verdict(loss,isBest);
+  const c=coach(move,v,preFen,bestSan,isBest);
+
   lastResult={preFen,postFen,bestUci,bestSan};
-  el.verdict.textContent=v.name;tone(v.tone);el.main.textContent=c[0];
-  el.your.textContent=move.san;el.best.textContent=bestSan;
-  if(isBest)el.comparison.classList.add('hidden');else el.comparison.classList.remove('hidden');
-  el.lesson.textContent=c[1];el.lessonBox.classList.remove('hidden');
-  if(loss!=null&&!isBest){el.pill.textContent=loss<100?'small difference':loss<200?'worth reviewing':'big swing';el.pill.classList.remove('hidden')}else el.pill.classList.add('hidden');
-  if(bestUci&&!isBest&&computerLevel==='off')el.show.classList.remove('hidden');else el.show.classList.add('hidden');
-  save({verdict:v.name,move:move.san,best:bestSan,lesson:c[1]})
+  el.verdict.textContent=v.name;
+  tone(v.tone);
+  el.main.textContent=c[0];
+  el.your.textContent=move.san;
+  el.best.textContent=bestSan;
+  if(isBest)el.comparison.classList.add('hidden');
+  else el.comparison.classList.remove('hidden');
+  el.lesson.textContent=c[1];
+  el.lessonBox.classList.remove('hidden');
+
+  if(loss!=null&&!isBest&&loss>35){
+   el.pill.textContent=loss<=90?'small engine preference':loss<=180?'worth comparing':'important difference';
+   el.pill.classList.remove('hidden');
+  }else el.pill.classList.add('hidden');
+
+  if(bestUci&&!isBest&&mode==='free')el.show.classList.remove('hidden');
+  else el.show.classList.add('hidden');
+
+  if(mode==='computer'&&player==='w'&&game.turn()==='b'&&!game.isGameOver()){
+   status('Computer thinking…');
+   await playComputerMove(computerReply);
+  }
  }catch(err){
-  console.error(err);el.verdict.textContent='Engine unavailable';tone('danger');
-  el.main.textContent='The board still works, but Stockfish could not complete this analysis.';
-  el.engine.textContent='Stockfish error';el.engine.className='engine-status error'
+  console.error(err);
+  el.verdict.textContent='Analysis unavailable';
+  tone('danger');
+  el.main.textContent='Stockfish could not finish this move analysis. You can keep playing.';
+  el.engine.textContent='Stockfish error';
+  el.engine.className='engine-status error';
  }finally{
-  el.intent.value='unsure';
-  if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver())await playComputerMove(computerReply);
-  busy=false;render();status()
+  busy=false;
+  render();
+  status();
  }
 }
 async function playComputerMove(bestMove=null){
- if(computerLevel==='off'||game.turn()!=='b'||game.isGameOver())return;
+ if(mode!=='computer'||game.turn()!=='b'||game.isGameOver())return;
  status('Computer thinking…');
  el.last.textContent='Computer is thinking…';
  render();
@@ -241,6 +245,7 @@ async function playComputerMove(bestMove=null){
 
 function clickSquare(square){
  if(busy||showingBetter)return;
+ if(mode==='computer'&&game.turn()==='b'){status('Computer thinking…');return}
  const p=game.get(square);
  if(!selected){
   if(!p||p.color!==game.turn()){status('Choose one of your own pieces.');return}
@@ -248,11 +253,11 @@ function clickSquare(square){
  }
  if(square===selected){selected=null;targets=[];render();status();return}
  if(p&&p.color===game.turn()){selected=square;targets=legal(square);render();return}
- const preFen=game.fen(),intent=el.intent.value;
+ const preFen=game.fen();
  try{
   const move=game.move({from:selected,to:square,promotion:'q'});if(!move)throw new Error('illegal');
   const postFen=game.fen();selected=null;targets=[];el.last.textContent='Last move: '+move.san;
-  render();status();analyseMove(move,preFen,postFen,intent)
+  render();status();analyseMove(move,preFen,postFen)
  }catch{status('That move is not legal.')}
 }
 function toggleBetter(){
@@ -264,24 +269,34 @@ function toggleBetter(){
   game.load(lastResult.postFen);showingBetter=false;demo=null;el.show.textContent='Show me the better move';status()
  }render()
 }
-function read(){try{return JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]')}catch{return[]}}
-function save(item){const a=read();a.unshift(item);localStorage.setItem(HISTORY_KEY,JSON.stringify(a.slice(0,8)));renderHistory()}
-function renderHistory(){
- const a=read();el.history.innerHTML='';el.historyEmpty.classList.toggle('hidden',a.length>0);
- for(const x of a){const li=document.createElement('li'),m=document.createElement('span');li.textContent=x.lesson;m.className='history-meta';m.textContent=x.verdict+': '+x.move+(x.best&&x.best!==x.move?' → '+x.best:'');li.appendChild(m);el.history.appendChild(li)}
-}
-el.reset.addEventListener('click',()=>{game=new Chess();selected=null;targets=[];busy=false;el.last.textContent='No move analysed yet.';resetAnalysis();render();status()});
+el.reset.addEventListener('click',()=>{
+ game=new Chess();
+ selected=null;
+ targets=[];
+ busy=false;
+ el.last.textContent='No moves yet.';
+ resetAnalysis();
+ render();
+ status();
+});
 el.flip.addEventListener('click',()=>{flipped=!flipped;render()});
 el.show.addEventListener('click',toggleBetter);
-el.clear.addEventListener('click',()=>{localStorage.removeItem(HISTORY_KEY);renderHistory()});
-el.computer.addEventListener('change',async()=>{
- computerLevel=el.computer.value;
- if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver()&&!busy){
-  busy=true;render();
+el.mode.addEventListener('change',async()=>{
+ mode=el.mode.value;
+ selected=null;
+ targets=[];
+ resetAnalysis();
+ render();
+ if(mode==='computer'&&game.turn()==='b'&&!game.isGameOver()){
+  busy=true;
+  render();
+  status('Computer thinking…');
   await playComputerMove();
-  busy=false;render();status();
+  busy=false;
+  render();
  }
+ status();
 });
 
-render();renderHistory();status();
+render();status();
 engine.init().then(()=>{el.engine.textContent='Stockfish ready';el.engine.className='engine-status ready'}).catch(err=>{console.error(err);el.engine.textContent='Stockfish failed to load';el.engine.className='engine-status error'});
