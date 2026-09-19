@@ -138,9 +138,11 @@ function resetAnalysis(){
 }
 async function analyseMove(move,preFen,postFen,intent){
  busy=true;render();status('Analysing your move…');el.verdict.textContent='Thinking…';el.main.textContent='Stockfish is comparing your move with the best option.';
+ let computerReply=null;
  try{
   const pre=await engine.analyse(preFen);
   const post=await engine.analyse(postFen);
+  computerReply=post&&post.bestMove?post.bestMove:null;
   const player=preFen.split(' ')[1],bestUci=pre.bestMove,bestSan=sanFor(preFen,bestUci)||'—';
   const playedUci=move.from+move.to+(move.promotion||'');
   const isBest=playedUci===bestUci;
@@ -160,7 +162,7 @@ async function analyseMove(move,preFen,postFen,intent){
   el.engine.textContent='Stockfish error';el.engine.className='engine-status error'
  }finally{
   el.intent.value='unsure';
-  if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver())await playComputerMove(post&&post.bestMove);
+  if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver())await playComputerMove(computerReply);
   busy=false;render();status()
  }
 }
