@@ -2,7 +2,10 @@ import { Chess } from 'https://cdn.jsdelivr.net/npm/chess.js@1.4.0/+esm';
 
 const ENGINE_PATH='./engine/stockfish-19-lite-single.js';
 const HISTORY_KEY='omb-history-v1';
-const DEPTH=10;
+const DEPTH=8;
+const POST_DEPTH=6;
+const COMPUTER_DEPTH=5;
+const ANALYSIS_TIMEOUT_MS=12000;
 const ICON={wp:'♙',wn:'♘',wb:'♗',wr:'♖',wq:'♕',wk:'♔',bp:'♟',bn:'♞',bb:'♝',br:'♜',bq:'♛',bk:'♚'};
 
 const $=s=>document.querySelector(s);
@@ -23,29 +26,53 @@ let game=new Chess(),selected=null,targets=[],flipped=false,busy=false,lastResul
 
 class Engine{
  constructor(){this.worker=null;this.pending=null;this.ready=null}
+
+ reset(){
+  try{if(this.worker)this.worker.terminate()}catch{}
+  this.worker=null;
+  this.pending=null;
+  this.ready=null;
+ }
+
  init(){
   if(this.ready)return this.ready;
   this.ready=new Promise((resolve,reject)=>{
    try{
     this.worker=new Worker(ENGINE_PATH);
-    const timer=setTimeout(()=>reject(new Error('Stockfish start timeout')),30000);
+    const timer=setTimeout(()=>{
+     this.reset();
+     reject(new Error('Stockfish start timeout'));
+    },ANALYSIS_TIMEOUT_MS);
+
     const ready=e=>{
      const t=String(e.data||'');
-     if(t.includes('uciok'))this.worker.postMessage('isready');
+     if(t.includes('uciok'))this.worker?.postMessage('isready');
      if(t.includes('readyok')){
       clearTimeout(timer);
-      this.worker.removeEventListener('message',ready);
+      this.worker?.removeEventListener('message',ready);
       resolve();
      }
     };
+
+    const fail=e=>{
+     clearTimeout(timer);
+     const message=e?.message||'Worker error';
+     this.reset();
+     reject(new Error(message));
+    };
+
     this.worker.addEventListener('message',ready);
     this.worker.addEventListener('message',e=>this.onMessage(e.data));
-    this.worker.addEventListener('error',e=>reject(new Error(e.message||'Worker error')),{once:true});
+    this.worker.addEventListener('error',fail,{once:true});
     this.worker.postMessage('uci');
-   }catch(err){reject(err)}
+   }catch(err){
+    this.reset();
+    reject(err);
+   }
   });
   return this.ready
  }
+
  onMessage(data){
   if(!this.pending)return;
   for(const raw of String(data||'').split(/\r?\n/)){
@@ -56,20 +83,43 @@ class Engine{
     if(sm&&pm)this.pending.info={type:sm[1],value:Number(sm[2]),pv:pm[1].trim().split(/\s+/)}
    }
    if(line.startsWith('bestmove ')){
-    const best=line.split(/\s+/)[1],result={bestMove:best==='(none)'?null:best,...(this.pending.info||{})};
-    const done=this.pending.done;this.pending=null;done(result)
+    const best=line.split(/\s+/)[1];
+    const result={bestMove:best==='(none)'?null:best,...(this.pending.info||{})};
+    const pending=this.pending;
+    this.pending=null;
+    pending.done(result);
    }
   }
  }
- async analyse(fen,depth=DEPTH){
-  await this.init();
-  if(this.pending)throw new Error('Engine busy');
-  return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{this.worker.postMessage('stop');this.pending=null;reject(new Error('Analysis timeout'))},25000);
-   this.pending={info:null,done:v=>{clearTimeout(timer);resolve(v)}};
-   this.worker.postMessage('position fen '+fen);
-   this.worker.postMessage('go depth '+depth)
-  })
+
+ async analyse(fen,depth=DEPTH,retry=true){
+  try{
+   await this.init();
+   if(this.pending)throw new Error('Engine busy');
+
+   return await new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{
+     try{this.worker?.postMessage('stop')}catch{}
+     this.pending=null;
+     this.reset();
+     reject(new Error('Analysis timeout'));
+    },ANALYSIS_TIMEOUT_MS);
+
+    this.pending={
+     info:null,
+     done:v=>{clearTimeout(timer);resolve(v)}
+    };
+
+    this.worker.postMessage('position fen '+fen);
+    this.worker.postMessage('go depth '+depth);
+   });
+  }catch(err){
+   if(retry){
+    this.reset();
+    return this.analyse(fen,Math.max(4,depth-2),false);
+   }
+   throw err;
+  }
  }
 }
 
@@ -435,9 +485,14 @@ async function analyseMove(move,preFen,postFen){
  el.main.textContent='Comparing your move with the strongest alternatives.';
  let computerReply=null;
  try{
-  const pre=await engine.analyse(preFen);
-  const post=await engine.analyse(postFen);
-  computerReply=post&&post.bestMove?post.bestMove:null;
+  const pre=await engine.analyse(preFen,DEPTH);
+  let post=null;
+  try{
+   post=await engine.analyse(postFen,POST_DEPTH);
+  }catch(postErr){
+   console.warn('Post-move analysis failed',postErr);
+  }
+  computerReply=post?.bestMove||null;
 
   const player=preFen.split(' ')[1];
   const bestUci=pre.bestMove;
@@ -516,9 +571,14 @@ async function analyseMove(move,preFen,postFen){
   console.error(err);
   el.verdict.textContent='Analysis unavailable';
   tone('danger');
-  el.main.textContent='Stockfish could not finish this move analysis. You can keep playing.';
-  el.engine.textContent='Stockfish error';
-  el.engine.className='engine-status error';
+  el.main.textContent='The coach could not finish this move analysis, but the game will continue.';
+  el.engine.textContent='Stockfish recovering…';
+  el.engine.className='engine-status';
+
+  const player=preFen.split(' ')[1];
+  if(mode==='computer'&&player==='w'&&game.turn()==='b'&&!game.isGameOver()){
+   await playComputerMove();
+  }
  }finally{
   busy=false;
   render();
@@ -531,20 +591,38 @@ async function playComputerMove(bestMove=null){
  el.last.textContent='Computer is thinking…';
  render();
  await wait(1000);
+
+ let uci=bestMove;
+
  try{
-  let uci=bestMove;
   if(!uci){
-   const result=await engine.analyse(game.fen(),6);
-   uci=result.bestMove;
+   const result=await engine.analyse(game.fen(),COMPUTER_DEPTH);
+   uci=result?.bestMove||null;
   }
-  if(!uci)throw new Error('No computer move');
-  const move=game.move(uciParts(uci));
-  if(!move)throw new Error('Computer returned an illegal move');
-  el.last.textContent='Computer played: '+move.san;
+
+  if(uci){
+   const move=game.move(uciParts(uci));
+   if(move){
+    el.last.textContent='Computer played: '+move.san;
+    el.engine.textContent='Stockfish ready';
+    el.engine.className='engine-status ready';
+    return;
+   }
+  }
  }catch(err){
-  console.error(err);
-  el.last.textContent='Computer could not move.';
-  status('Computer move failed.');
+  console.error('Computer engine move failed',err);
+ }
+
+ // Never freeze the game because the engine failed.
+ const legalMoves=game.moves({verbose:true});
+ if(legalMoves.length){
+  const fallback=legalMoves[0];
+  const move=game.move({from:fallback.from,to:fallback.to,promotion:fallback.promotion||'q'});
+  el.last.textContent='Computer played: '+(move?.san||'move');
+  el.engine.textContent='Stockfish recovering…';
+  el.engine.className='engine-status';
+ }else{
+  el.last.textContent='No legal computer move.';
  }
 }
 
@@ -614,4 +692,4 @@ el.mode.addEventListener('change',async()=>{
 });
 
 render();status();
-engine.init().then(()=>{el.engine.textContent='Stockfish ready';el.engine.className='engine-status ready'}).catch(err=>{console.error(err);el.engine.textContent='Stockfish failed to load';el.engine.className='engine-status error'});
+engine.init().then(()=>{el.engine.textContent='Stockfish ready';el.engine.className='engine-status ready'}).catch(err=>{console.error(err);el.engine.textContent='Stockfish will retry';el.engine.className='engine-status'});
