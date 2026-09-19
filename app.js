@@ -3,7 +3,6 @@ import { Chess } from 'https://cdn.jsdelivr.net/npm/chess.js@1.4.0/+esm';
 const ENGINE_PATH='./engine/stockfish-19-lite-single.js';
 const HISTORY_KEY='omb-history-v1';
 const DEPTH=10;
-const COMPUTER_DEPTH={beginner:3,club:6,strong:10};
 const ICON={wp:'♙',wn:'♘',wb:'♗',wr:'♖',wq:'♕',wk:'♔',bp:'♟',bn:'♞',bb:'♝',br:'♜',bq:'♛',bk:'♚'};
 
 const $=s=>document.querySelector(s);
@@ -153,7 +152,7 @@ async function analyseMove(move,preFen,postFen,intent){
   el.your.textContent=move.san;el.best.textContent=bestSan;el.comparison.classList.remove('hidden');
   el.lesson.textContent=c[1];el.lessonBox.classList.remove('hidden');
   if(loss!=null&&!isBest){el.pill.textContent=loss<100?'small difference':loss<200?'worth reviewing':'big swing';el.pill.classList.remove('hidden')}else el.pill.classList.add('hidden');
-  if(bestUci&&!isBest)el.show.classList.remove('hidden');else el.show.classList.add('hidden');
+  if(bestUci&&!isBest&&computerLevel==='off')el.show.classList.remove('hidden');else el.show.classList.add('hidden');
   save({verdict:v.name,move:move.san,best:bestSan,lesson:c[1]})
  }catch(err){
   console.error(err);el.verdict.textContent='Engine unavailable';tone('danger');
@@ -161,24 +160,29 @@ async function analyseMove(move,preFen,postFen,intent){
   el.engine.textContent='Stockfish error';el.engine.className='engine-status error'
  }finally{
   el.intent.value='unsure';
-  if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver())await playComputerMove();
+  if(computerLevel!=='off'&&game.turn()==='b'&&!game.isGameOver())await playComputerMove(post&&post.bestMove);
   busy=false;render();status()
  }
 }
-async function playComputerMove(){
+async function playComputerMove(bestMove=null){
  if(computerLevel==='off'||game.turn()!=='b'||game.isGameOver())return;
  status('Computer thinking…');
  el.last.textContent='Computer is thinking…';
  render();
  try{
-  const result=await engine.analyse(game.fen(),COMPUTER_DEPTH[computerLevel]||3);
-  if(!result.bestMove)throw new Error('No computer move');
-  const move=game.move(uciParts(result.bestMove));
+  let uci=bestMove;
+  if(!uci){
+   const result=await engine.analyse(game.fen(),6);
+   uci=result.bestMove;
+  }
+  if(!uci)throw new Error('No computer move');
+  const move=game.move(uciParts(uci));
   if(!move)throw new Error('Computer returned an illegal move');
   el.last.textContent='Computer played: '+move.san;
  }catch(err){
   console.error(err);
   el.last.textContent='Computer could not move.';
+  status('Computer move failed.');
  }
 }
 
