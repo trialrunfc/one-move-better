@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="One Move Better: a free beginner-friendly chess coach.">
   <title>One Move Better</title>
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <main class="app-shell">
@@ -49,19 +49,42 @@
             <span id="loss-pill" class="loss-pill hidden"></span>
           </div>
 
-          <p id="coach-main" class="coach-main">I'll compare your move with Stockfish and give you one useful thing to remember.</p>
+          <p id="coach-main" class="coach-main">Make a move and I'll help you understand the position, not just give you an engine move.</p>
 
-          <div id="comparison" class="comparison hidden">
-            <div><span>Your move</span><strong id="your-move">—</strong></div>
-            <div><span>Better move</span><strong id="best-move">—</strong></div>
+          <div id="think-box" class="coach-question hidden">
+            <span>THINK FIRST</span>
+            <p id="coach-question"></p>
           </div>
 
-          <div id="lesson-box" class="lesson hidden">
-            <span>ONE THING TO REMEMBER</span>
-            <p id="lesson-text"></p>
+          <button id="explain-btn" type="button" class="button primary hidden">Show explanation</button>
+
+          <div id="explanation" class="hidden">
+            <div id="comparison" class="comparison">
+              <div id="your-idea-card">
+                <span id="your-idea-label">Your idea</span>
+                <p id="your-idea"></p>
+                <small id="your-move" class="notation"></small>
+              </div>
+              <div id="better-idea-card">
+                <span>Stronger idea</span>
+                <p id="better-idea"></p>
+                <small id="best-move" class="notation"></small>
+              </div>
+            </div>
+
+            <div id="reply-box" class="reply-box hidden">
+              <span>WHAT HAPPENS NEXT</span>
+              <p id="reply-text"></p>
+              <small id="pv-notation" class="notation"></small>
+            </div>
+
+            <div id="lesson-box" class="lesson">
+              <span>ONE THING TO REMEMBER</span>
+              <p id="lesson-text"></p>
+            </div>
           </div>
 
-          <button id="show-better-btn" type="button" class="button primary hidden">Show me the better move</button>
+          <button id="show-better-btn" type="button" class="button hidden">Show move on board</button>
         </section>
 
         <section id="recap-panel" class="panel hidden" aria-live="polite">
@@ -87,6 +110,6 @@
       <p>Stockfish calculates the chess. One Move Better turns the result into beginner-friendly coaching.</p>
     </footer>
   </main>
-  <script type="module" src="app.js?v=9"></script>
+  <script type="module" src="app.js?v=10"></script>
 </body>
 </html>
