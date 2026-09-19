@@ -246,23 +246,27 @@ function principleFor(move,bestDetails,isBest){
 
 function revealExplanation(data){
  pendingExplanation=null;
- el.thinkBox.classList.add('hidden');
- el.main.textContent=data.main;
- if(data.isBest||data.smallPreference){
-  el.comparison.classList.add('hidden');
- }else{
-  el.your.textContent=data.yourLabel;
-  el.yourNotation.textContent='Notation: '+data.yourSan;
-  el.best.textContent=data.bestLabel;
-  el.bestNotation.textContent='Notation: '+data.bestSan;
-  el.comparison.classList.remove('hidden');
+ if(el.thinkBox)el.thinkBox.classList.add('hidden');
+ if(el.main)el.main.textContent=data.main||'Move analysed.';
+ if(el.comparison){
+  if(data.isBest||data.smallPreference){
+   el.comparison.classList.add('hidden');
+  }else{
+   if(el.your)el.your.textContent=data.yourLabel||data.yourSan||'Your move';
+   if(el.yourNotation)el.yourNotation.textContent=data.yourSan?'Notation: '+data.yourSan:'';
+   if(el.best)el.best.textContent=data.bestLabel||data.bestSan||'Alternative';
+   if(el.bestNotation)el.bestNotation.textContent=data.bestSan?'Notation: '+data.bestSan:'';
+   el.comparison.classList.remove('hidden');
+  }
  }
- el.lesson.textContent=data.principle;
- el.lessonBox.classList.remove('hidden');
- if(data.reply){
-  el.reply.textContent=data.reply;
-  el.replyBox.classList.remove('hidden');
- }else el.replyBox.classList.add('hidden');
+ if(el.lesson)el.lesson.textContent=data.principle||'Look for the move that improves your position most efficiently.';
+ if(el.lessonBox)el.lessonBox.classList.remove('hidden');
+ if(el.replyBox){
+  if(data.reply&&el.reply){
+   el.reply.textContent=data.reply;
+   el.replyBox.classList.remove('hidden');
+  }else el.replyBox.classList.add('hidden');
+ }
 }
 
 function verdict(loss,best){
@@ -445,33 +449,57 @@ async function analyseMove(move,preFen,postFen){
   const loss=(preP==null||postP==null)?null:Math.max(0,preP-postP);
   const v=verdict(loss,isBest);
   recordGameNote(move,loss,v.name,player);
-  const explanation=buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,pre,v.name);
-
-  lastResult={preFen,postFen,bestUci,bestSan};
-  el.verdict.textContent=v.name;
-  tone(v.tone);
-  el.comparison.classList.add('hidden');
-  el.lessonBox.classList.add('hidden');
-  el.replyBox.classList.add('hidden');
-  el.thinkBox.classList.add('hidden');
-
-  const askFirst=!isBest&&['Inaccuracy','Mistake','Blunder'].includes(v.name);
-  if(askFirst){
-   pendingExplanation=explanation;
-   el.main.textContent='Your move is playable. Before I explain the alternative, think about this:';
-   el.thinkText.textContent=explanation.question;
-   el.thinkBox.classList.remove('hidden');
-  }else{
-   revealExplanation(explanation);
+  let explanation;
+  try{
+   explanation=buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,pre,v.name);
+  }catch(formatErr){
+   console.error('Coaching format error',formatErr);
+   explanation={
+    main:humanMoveLabel(move)+'. '+moveIdea(preFen,move),
+    isBest,
+    smallPreference:['Strong move','Playable move'].includes(v.name),
+    yourLabel:humanMoveLabel(move),
+    yourSan:move.san,
+    bestLabel:bestSan,
+    bestSan,
+    reply:'',
+    principle:'Focus on what the move changes in this exact position.',
+    question:'What does this move improve?'
+   };
   }
 
-  if(loss!=null&&!isBest&&loss>90){
-   el.pill.textContent=loss<=180?'worth comparing':'important difference';
-   el.pill.classList.remove('hidden');
-  }else el.pill.classList.add('hidden');
+  lastResult={preFen,postFen,bestUci,bestSan};
+  try{
+   el.verdict.textContent=v.name;
+   tone(v.tone);
+   if(el.comparison)el.comparison.classList.add('hidden');
+   if(el.lessonBox)el.lessonBox.classList.add('hidden');
+   if(el.replyBox)el.replyBox.classList.add('hidden');
+   if(el.thinkBox)el.thinkBox.classList.add('hidden');
 
-  if(bestUci&&!isBest&&mode==='free')el.show.classList.remove('hidden');
-  else el.show.classList.add('hidden');
+   const askFirst=!isBest&&['Inaccuracy','Mistake','Blunder'].includes(v.name);
+   if(askFirst){
+    pendingExplanation=explanation;
+    el.main.textContent='Your move is playable. Before I explain the alternative, think about this:';
+    if(el.thinkText)el.thinkText.textContent=explanation.question;
+    if(el.thinkBox)el.thinkBox.classList.remove('hidden');
+    else revealExplanation(explanation);
+   }else{
+    revealExplanation(explanation);
+   }
+
+   if(loss!=null&&!isBest&&loss>90){
+    el.pill.textContent=loss<=180?'worth comparing':'important difference';
+    el.pill.classList.remove('hidden');
+   }else el.pill.classList.add('hidden');
+
+   if(bestUci&&!isBest&&mode==='free')el.show.classList.remove('hidden');
+   else el.show.classList.add('hidden');
+  }catch(uiErr){
+   console.error('Coaching UI error',uiErr);
+   el.verdict.textContent=v.name;
+   el.main.textContent=humanMoveLabel(move)+'. '+moveIdea(preFen,move);
+  }
 
   if(game.isGameOver()){
    finished=true;
