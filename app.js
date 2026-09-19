@@ -248,7 +248,7 @@ function revealExplanation(data){
  pendingExplanation=null;
  el.thinkBox.classList.add('hidden');
  el.main.textContent=data.main;
- if(data.isBest){
+ if(data.isBest||data.smallPreference){
   el.comparison.classList.add('hidden');
  }else{
   el.your.textContent=data.yourLabel;
@@ -273,29 +273,35 @@ function verdict(loss,best){
  if(loss<=320)return{name:'Mistake',tone:'warn'};
  return{name:'Blunder',tone:'danger'}
 }
-function buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,preAnalysis){
+function buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,preAnalysis,verdictName){
  const bestDetails=moveDetailsFromUci(preFen,bestUci);
  const yourLabel=humanMoveLabel(move);
  const yourIdea=moveIdea(preFen,move);
  const bestLabel=bestDetails?bestDetails.label:(bestSan||'Alternative move');
  const bestIdea=bestDetails?moveIdea(preFen,bestDetails.move):'It improves the position more efficiently.';
+ const smallPreference=['Strong move','Playable move'].includes(verdictName);
 
  let main;
  if(isBest){
   main=yourLabel+'. '+yourIdea;
+ }else if(smallPreference){
+  main=yourLabel+'. '+yourIdea+' This is a sound choice in this position.';
  }else{
-  main='Your idea: '+yourLabel+'. '+yourIdea+' Alternative: '+bestLabel+'. '+bestIdea;
+  main='Your idea: '+yourLabel+'. '+yourIdea+' In this exact position, '+bestLabel.toLowerCase()+' is stronger because '+bestIdea.charAt(0).toLowerCase()+bestIdea.slice(1);
  }
 
  return{
   main,
   isBest,
+  smallPreference,
   yourLabel,
   yourSan:move.san,
   bestLabel,
   bestSan,
-  reply:continuationText(preFen,preAnalysis?.pv),
-  principle:principleFor(move,bestDetails,isBest),
+  reply:smallPreference?'':continuationText(preFen,preAnalysis?.pv),
+  principle:smallPreference
+    ? principleFor(move,null,true)
+    : principleFor(move,bestDetails,isBest),
   question:questionFor(bestDetails)
  };
 }
@@ -439,7 +445,7 @@ async function analyseMove(move,preFen,postFen){
   const loss=(preP==null||postP==null)?null:Math.max(0,preP-postP);
   const v=verdict(loss,isBest);
   recordGameNote(move,loss,v.name,player);
-  const explanation=buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,pre);
+  const explanation=buildMoveExplanation(move,preFen,bestUci,bestSan,isBest,pre,v.name);
 
   lastResult={preFen,postFen,bestUci,bestSan};
   el.verdict.textContent=v.name;
@@ -449,7 +455,7 @@ async function analyseMove(move,preFen,postFen){
   el.replyBox.classList.add('hidden');
   el.thinkBox.classList.add('hidden');
 
-  const askFirst=!isBest&&['Strong move','Playable move','Inaccuracy'].includes(v.name);
+  const askFirst=!isBest&&['Inaccuracy','Mistake','Blunder'].includes(v.name);
   if(askFirst){
    pendingExplanation=explanation;
    el.main.textContent='Your move is playable. Before I explain the alternative, think about this:';
@@ -459,8 +465,8 @@ async function analyseMove(move,preFen,postFen){
    revealExplanation(explanation);
   }
 
-  if(loss!=null&&!isBest&&loss>35){
-   el.pill.textContent=loss<=90?'small engine preference':loss<=180?'worth comparing':'important difference';
+  if(loss!=null&&!isBest&&loss>90){
+   el.pill.textContent=loss<=180?'worth comparing':'important difference';
    el.pill.classList.remove('hidden');
   }else el.pill.classList.add('hidden');
 
