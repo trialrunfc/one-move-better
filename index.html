@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="One Move Better: a free beginner-friendly chess coach.">
   <title>One Move Better</title>
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <main class="app-shell">
@@ -24,6 +24,7 @@
         <div class="board-actions">
           <button id="reset-btn" type="button" class="button primary">New game</button>
           <button id="flip-btn" type="button" class="button">Flip board</button>
+          <button id="recap-btn" type="button" class="button">Finish & recap</button>
           <select id="mode-select" class="compact-select" aria-label="Game mode">
             <option value="computer" selected>Play computer</option>
             <option value="free">Free board · both sides</option>
@@ -62,6 +63,23 @@
 
           <button id="show-better-btn" type="button" class="button primary hidden">Show me the better move</button>
         </section>
+
+        <section id="recap-panel" class="panel hidden" aria-live="polite">
+          <p class="panel-kicker">GAME RECAP</p>
+          <h2 id="recap-title">Your game</h2>
+          <div class="recap-block">
+            <span>WHAT YOU DID WELL</span>
+            <p id="recap-good"></p>
+          </div>
+          <div class="recap-block">
+            <span>WHAT HELD YOU BACK</span>
+            <p id="recap-improve"></p>
+          </div>
+          <div class="recap-focus">
+            <span>TRY THIS NEXT GAME</span>
+            <p id="recap-focus"></p>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -69,6 +87,6 @@
       <p>Stockfish calculates the chess. One Move Better turns the result into beginner-friendly coaching.</p>
     </footer>
   </main>
-  <script type="module" src="app.js?v=8"></script>
+  <script type="module" src="app.js?v=9"></script>
 </body>
 </html>
